@@ -1,281 +1,198 @@
-﻿using Il2CppSystem.Reflection;
-using MelonLoader;
-using System.Threading.Tasks;
-using UnhollowerBaseLib;
-using UnhollowerRuntimeLib;
+﻿using MelonLoader;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.InputSystem;
+using EekAddOns;
+using UnhollowerRuntimeLib;
+using EekCharacterEngine.Interaction;
+using HPmdk;
+using HouseParty;
+using EekCharacterEngine;
+using EekEvents;
 
-namespace Project
+namespace HPInvader
 {
     public class HPInvader : MelonMod
     {
         private Scene scene = SceneManager.GetActiveScene();
-        private Vector3 vec = new Vector3();
-        private static readonly Vector3 offset = new Vector3(0, 1.943712f, -0.2156f);
-        private static readonly Vector3 mainMenuPos = new Vector3(0, 0.635f, -10);
-        private static readonly Quaternion mainMenuRot = new Quaternion(-0.04361941f, 0, 0, 0.9990483f);
-        private Component camera = new Component();
-        private Component playerRoot = new Component(); //wird nur bei warpto geupdated??? 
-        private float speed = 2.3f;
-        private float speedr = 60f;
-        private bool inFreecam = false;
-        private MethodInfo inputManagerSubscribeEvents;
-        private MethodInfo inputManagerUnsubscribeEvents;
-        private Il2CppSystem.Object inputManager;
-
+        public static bool IsLoading = false;
+        public static bool inMainMenu = false;
+        public static bool inGameMain = false;
+        private bool inMinigame = false;
+        private Freecam freecam;
+        private HousePartyPlayerCharacter player = null;
+        public Rect windowRect = new Rect(20, 20, 400, 200);
+        private float speed = 2f;
+        AmyCharacter amy;
+        Camera camera;
 
         public override void OnSceneWasLoaded(int buildIndex, string sceneName)
         {
-            //ListMethodsOfGameObjects();
+            freecam = new Freecam(Object.FindObjectOfType<Camera>());
+            camera = Object.FindObjectOfType<Camera>();
             InitializeGameObjects();
         }
 
         public override void OnUpdate()
         {
             //toggle freecam with alt+f
-            if (Input.GetKeyDown(KeyCode.F) && Input.GetKey(KeyCode.LeftAlt))
+            if (Keyboard.current[Key.F].wasPressedThisFrame && Keyboard.current[Key.LeftAlt].isPressed)
             {
-                if (camera != null)
+                if (freecam.Enabled())
                 {
-                    if (inFreecam)
+                    freecam.SetDisabled();
+                    freecam.SetRotationDisabled();
+                    if (inGameMain)
                     {
-                        inFreecam = false;
-
-                        if (scene.name == "GameMain")
+                        player.Incapacitated = false;
+                        player.IsImmobile = false;
+                        Camera temp_camera = Object.FindObjectOfType<Camera>();
+                        if ((temp_camera.transform.position - player.Head.position + new Vector3(0, 0.1f, 0) + Vector3.Scale(player.Head.forward, new Vector3(0.2f, 0.2f, 0.2f))).magnitude >= 0.3)
                         {
-                            camera.transform.position = playerRoot.transform.position + offset;
-
-                            inputManagerSubscribeEvents.Invoke(inputManager, new Il2CppReferenceArray<Il2CppSystem.Object>(new Il2CppSystem.Object[] { }));
-                        }
-                        else if (scene.name == "MainMenu")
-                        {
-                            camera.transform.position = mainMenuPos;
-                            camera.transform.rotation = mainMenuRot;
-                        }
-                    }
-                    else
-                    {
-                        inFreecam = true;
-                        if (scene.name == "GameMain")
-                        {
-                            inputManagerUnsubscribeEvents.Invoke(inputManager, new Il2CppReferenceArray<Il2CppSystem.Object>(new Il2CppSystem.Object[] { }));
+                            for (int i = 0; i < 10; i++)
+                            {
+                                temp_camera.transform.position = player.Head.position + new Vector3(0, 0.1f, 0) + Vector3.Scale(player.Head.forward, new Vector3(0.2f, 0.2f, 0.2f));
+                            }
                         }
                     }
                 }
+                else
+                {
+                    if (inGameMain)
+                    {
+                        player.Incapacitated = true;
+                        player.IsImmobile = true;
+                    }
+                    else
+                    {
+                        freecam.SetRotationEnabled();
+                    }
+                    freecam.SetEnabled();
+                }
 
             }
-            else if (Input.GetKeyDown(KeyCode.M) && Input.GetKey(KeyCode.LeftAlt)) //list methods of gameobjects
+            else if (Keyboard.current[Key.U].wasPressedThisFrame && Keyboard.current[Key.LeftAlt].isPressed)
             {
-                ListMethodsOfGameObjects();
-            }
-            else if (Input.GetKeyDown(KeyCode.P) && Input.GetKey(KeyCode.LeftAlt)) //list properties of gameobjects
-            {
-                ListPropertiesOfGameObjects();
-            }
-            else if (Input.GetKeyDown(KeyCode.X) && Input.GetKey(KeyCode.LeftAlt)) //list fields of gameobjects
-            {
-                ListFieldsOfGameObjects();
-            }
-            else if (Input.GetKeyDown(KeyCode.T) && Input.GetKey(KeyCode.LeftAlt)) //test gameobjects
-            {
-                _ = TestGameObjects();
+                //toggle in minigame
+                inMinigame = !inMinigame;
+                if (inMinigame)
+                {
+                    amy = Object.FindObjectOfType<AmyCharacter>();
+                    if (amy != null)
+                    {
+                        amy.Mecanim.HPCPOABEPPO(10);
+                    }
+                    MinigameInit();
+                }
+                else
+                {
+                    ResetMinigame();
+                }
             }
 
             //run freecam
-            if (inFreecam)
+            if (freecam.Enabled())
             {
-                Freecam();
+                freecam.Update();
+            }
+            if (inGameMain)
+            {
+                if (inMinigame)
+                {
+                    Minigame();
+                }
             }
         }
 
         public void InitializeGameObjects()
         {
             scene = SceneManager.GetActiveScene();
-            GameObject[] objects = scene.GetRootGameObjects();
+            GameObject playerObj = null;
             MelonLogger.Msg("Scene loaded: " + scene.name);
-            foreach (GameObject item in objects)
+            inMainMenu = scene.name == "MainMenu";
+            inGameMain = scene.name == "GameMain";
+            IsLoading = scene.name == "LoadingScreen";
+            foreach (GameObject item in scene.GetRootGameObjects())
             {
-                Component[] comps = item.GetComponents(Il2CppType.Of<Component>());
-                foreach (Component comp in comps)
+                if (inGameMain)
                 {
-                    if (comp.ToString() == "Input Manager (Rewired.InputManager)")
+                    if (item.name == "PlayerMale Root")
                     {
-                        Il2CppReferenceArray<MethodInfo> methodInfos = comp.GetIl2CppType().GetMethods(BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-                        inputManager = comp.GetIl2CppType().TryCast<Il2CppSystem.Object>();
-                        foreach (MethodInfo method in methodInfos)
-                        {
-                            //getting methods
-                            if (method.Name == "OnInitialized")
-                            {
-                                inputManagerSubscribeEvents = method;
-                            }
-                            else if (method.Name == "ResetAll")
-                            {
-                                inputManagerUnsubscribeEvents = method;
-                            }
-                        }
-                    }
-                }
-                if (item.name == "Camera")
-                {
-                    camera = item.GetComponent(Il2CppType.Of<Transform>());
-                    MelonLogger.Msg("got " + camera.ToString());
-                }
-                else if (item.name == "PlayerMale Root")
-                {
-                    playerRoot = item.GetComponent(Il2CppType.Of<Transform>());
-                    MelonLogger.Msg("got " + playerRoot.ToString());
-                }
-            }
-        }
-
-        public void ListMethodsOfGameObjects()
-        {
-            scene = SceneManager.GetActiveScene();
-            GameObject[] objects = scene.GetRootGameObjects();
-            MelonLogger.Msg("Current scene: " + scene.name);
-            foreach (GameObject item in objects)
-            {
-                Component[] items = item.GetComponents(Il2CppType.Of<Component>());
-                foreach (Component comp in items)
-                {
-                    MelonLogger.Msg(comp.ToString() + " from " + item.ToString());
-                    if (comp.ToString() == "Input Manager (Rewired.Data.UserDataStore_PlayerPrefs)")
-                    {
-                        Il2CppReferenceArray<MethodInfo> methodInfos = comp.GetIl2CppType().GetMethods(BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-                        Il2CppSystem.Object inputManager2 = comp.GetIl2CppType().TryCast<Il2CppSystem.Object>();
-                        foreach (MethodInfo method in methodInfos)
-                        {
-                            MelonLogger.Msg("M:" + comp.name + "." + method.Name + "()");
-                            /*
-                            MelonLogger.Msg("Trying to run" + comp.name + "." + method.Name + "()");
-                            Il2CppSystem.Object result = method.Invoke(inputManager2, new Il2CppReferenceArray<Il2CppSystem.Object>(new Il2CppSystem.Object[] { }));
-                            if (result != null)
-                            {
-                                MelonLogger.Msg("Result: " + result.ToString());
-                            }*/
-                        }
-                    }
-                    else if (comp.GetIl2CppType() != Il2CppType.Of<Transform>())
-                    {
-                        Il2CppReferenceArray<MethodInfo> methodInfos = comp.GetIl2CppType().GetMethods(BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Public);
-                        foreach (MethodInfo method in methodInfos)
-                        {
-                            MelonLogger.Msg("M:" + comp.name + "." + method.Name + "()");
-                        }
+                        playerObj = item;
                     }
                 }
             }
-        }
-
-        //memo: can't set properties
-        public void ListPropertiesOfGameObjects()
-        {
-            scene = SceneManager.GetActiveScene();
-            GameObject[] objects = scene.GetRootGameObjects();
-            MelonLogger.Msg("Scene loaded: " + scene.name);
-            foreach (GameObject item in objects)
+            if (inGameMain)
             {
-                Component[] items = item.GetComponents(Il2CppType.Of<Component>());
-                foreach (Component comp in items)
-                {
-                    MelonLogger.Msg(comp.ToString() + " from " + item.ToString());
-                    Il2CppReferenceArray<PropertyInfo> propertyInfos = comp.GetIl2CppType().GetProperties(BindingFlags.NonPublic | BindingFlags.Instance);
-                    foreach (PropertyInfo property in propertyInfos)
-                    {
-                        MelonLogger.Msg("P:" + comp.name + "." + property.Name);
-                    }
-                }
+                player = Object.FindObjectOfType<HousePartyPlayerCharacter>();
+                amy = Object.FindObjectOfType<AmyCharacter>();
             }
         }
 
-        //memo: can't set fields
-        public void ListFieldsOfGameObjects()
+        private void ResetMinigame()
         {
-            scene = SceneManager.GetActiveScene();
-            GameObject[] objects = scene.GetRootGameObjects();
-            MelonLogger.Msg("Scene loaded: " + scene.name);
-            foreach (GameObject item in objects)
+            if (amy != null)
             {
-                Component[] items = item.GetComponents(Il2CppType.Of<Component>());
-                foreach (Component comp in items)
-                {
-                    MelonLogger.Msg(comp.ToString() + " from " + item.ToString());
-                    Il2CppReferenceArray<FieldInfo> fieldInfos = comp.GetIl2CppType().GetFields(BindingFlags.NonPublic | BindingFlags.Instance);
-                    foreach (FieldInfo property in fieldInfos)
-                    {
-                        MelonLogger.Msg("F:" + comp.name + "." + property.Name);
-                    }
-                }
+                amy.IsImmobile = false;
+                amy._activePositionOverride = false;
+                amy.Mecanim.OGBKIDBHJDB();
+                amy.Clothes.ACMHNFDKNLL(EHFOEJADICB.Shoes, true, 0);
+                amy.Clothes.ACMHNFDKNLL(EHFOEJADICB.Bottom, true, 0);
+                amy.Clothes.ACMHNFDKNLL(EHFOEJADICB.Top, true, 0);
+            }
+            player.Incapacitated = false;
+            player.IsImmobile = false;
+            player._activePositionOverride = false;
+            player.Clothes.ACMHNFDKNLL(EHFOEJADICB.Shoes, true, 0);
+            player.Clothes.ACMHNFDKNLL(EHFOEJADICB.Bottom, true, 0);
+            player.Clothes.ACMHNFDKNLL(EHFOEJADICB.Top, true, 0);
+        }
+
+        private void MinigameInit()
+        {
+            amy = Object.FindObjectOfType<AmyCharacter>();
+            if (amy != null)
+            {
+                amy.SetPositionOverride(new Vector3(0.5f, 0.3f, -6));
+                amy.IsImmobile = true;
+                amy.Clothes.AMODMPBOFOK(false, 0);
+            }
+            player.Incapacitated = true;
+            player.IsImmobile = true;
+            player.SetPositionOverride(new Vector3(0.5f, 0.3f, -5));
+            player.Clothes.AMODMPBOFOK(false, 0);
+        }
+
+        private void Minigame()
+        {
+            amy = Object.FindObjectOfType<AmyCharacter>();
+            if (amy != null)
+            {
+                amy.transform.rotation = Quaternion.Euler(0, 0, 0);
+            }
+
+            player.transform.rotation = Quaternion.Euler(0, 180, 0);
+            camera.transform.position = player.puppetHip.position + player.puppetHip.forward * 0.12f;
+
+            if (Keyboard.current[Key.W].isPressed)
+            {
+                player._positionOverride += player.transform.forward * speed * Time.deltaTime;
+            }
+            else if (Keyboard.current[Key.S].isPressed)
+            {
+                player._positionOverride -= player.transform.forward * speed * Time.deltaTime;
             }
         }
 
-        public async Task TestGameObjects()
+        public void Test()
         {
-            scene = SceneManager.GetActiveScene();
-            GameObject[] objects = scene.GetRootGameObjects();
-            MelonLogger.Msg("temporarily disabling each gameobject in " + scene.name);
-            foreach (GameObject item in objects)
-            {
-                if (item.name != "Camera" || item.name != "Interactive Items")
-                {
-                    item.SetActive(false);
-                    MelonLogger.Msg("deactivated " + item.ToString());
-                    await Task.Delay(5000);
-                    item.SetActive(true);
-                    MelonLogger.Msg("activated " + item.ToString());
-                    await Task.Delay(5000);
-                }
-                else MelonLogger.Msg("can't reactivate " + item.name + ", so won't deactivate in the first place :)");
-            }
-        }
+            amy = Object.FindObjectsOfType<HouseParty.AmyCharacter>()[0];
 
-        public void Freecam()
-        {
-            if (Input.GetKey(KeyCode.W))
+            int d = 0;
+            foreach (int state in amy.LKIFNHMMHAK)
             {
-                camera.transform.get_position_Injected(out vec);
-                vec += camera.transform.forward * speed * Time.deltaTime;
-                camera.transform.set_position_Injected(ref vec);
-            }
-            else if (Input.GetKey(KeyCode.S))
-            {
-                camera.transform.get_position_Injected(out vec);
-                vec -= camera.transform.forward * speed * Time.deltaTime;
-                camera.transform.set_position_Injected(ref vec);
-            }
-            if (Input.GetKey(KeyCode.A))
-            {
-                camera.transform.get_position_Injected(out vec);
-                vec -= camera.transform.right * speed * Time.deltaTime;
-                camera.transform.set_position_Injected(ref vec);
-            }
-            else if (Input.GetKey(KeyCode.D))
-            {
-                camera.transform.get_position_Injected(out vec);
-                vec += camera.transform.right * speed * Time.deltaTime;
-                camera.transform.set_position_Injected(ref vec);
-            }
-            if (Input.GetKey(KeyCode.LeftShift))
-            {
-                camera.transform.get_position_Injected(out vec);
-                vec += camera.transform.up * speed * Time.deltaTime;
-                camera.transform.set_position_Injected(ref vec);
-            }
-            else if (Input.GetKey(KeyCode.LeftControl))
-            {
-                camera.transform.get_position_Injected(out vec);
-                vec -= camera.transform.up * speed * Time.deltaTime; ;
-                camera.transform.set_position_Injected(ref vec);
-            }
-            if (Input.GetKey(KeyCode.E))
-            {
-                camera.transform.Rotate(Vector3.up * speedr * Time.deltaTime);
-            }
-            else if (Input.GetKey(KeyCode.Q))
-            {
-                camera.transform.Rotate(Vector3.down * speedr * Time.deltaTime);
+                MelonLogger.Msg($"at pos {d}: {state}");
+                d++;
             }
         }
     }
