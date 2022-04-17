@@ -79,6 +79,10 @@
       <HintPath>G:\SteamLibrary\steamapps\common\House Party\MelonLoader\Managed\UnityEngine.IMGUIModule.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>G:\SteamLibrary\steamapps\common\House Party\MelonLoader\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="UnityEngine.UI">
       <HintPath>G:\SteamLibrary\steamapps\common\House Party\MelonLoader\Managed\UnityEngine.UI.dll</HintPath>
       <Private>False</Private>
@@ -86,7 +90,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Freecam.cs" />
-    <Compile Include="HPInvader.cs" />
+    <Compile Include="HPMinigames.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
