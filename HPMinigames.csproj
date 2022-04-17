@@ -89,7 +89,6 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Freecam.cs" />
     <Compile Include="HPMinigames.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
